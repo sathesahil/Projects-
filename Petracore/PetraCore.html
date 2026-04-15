@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PetraCore - Live Rockfall Prediction Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #232526 0%, #414345 100%);
+            min-height: 100vh;
+        }
+        .zone {
+            transition: all 0.3s ease-in-out;
+            cursor: pointer;
+        }
+        .zone:hover, .zone.selected {
+            stroke: #34d399;
+            stroke-width: 4px;
+            filter: brightness(1.2);
+        }
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);}
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);}
+        }
+        .high-risk-pulse { animation: pulse-red 2s infinite; }
+        .high-risk-text { color: #ef4444; }
+        .moderate-risk-text { color: #f59e0b; }
+        .low-risk-text { color: #22c55e; }
+        .panel {
+            box-shadow: 0 8px 32px 0 rgba(16, 185, 129, 0.08), 0 1.5px 4px 0 rgba(0,0,0,0.10);
+        }
+        .spinner {
+            border: 4px solid #e5e7eb;
+            border-top: 4px solid #34d399;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg);}
+            100% { transform: rotate(360deg);}
+        }
+        @media (max-width: 1024px) {
+            .lg\:grid-cols-3 { grid-template-columns: 1fr !important; }
+            .lg\:col-span-2 { grid-column: span 1 / span 1 !important; }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-gray-200">
+
+    <div class="flex flex-col h-screen">
+        <header class="bg-gradient-to-r from-emerald-700 via-gray-800 to-emerald-900 border-b border-gray-700 p-4 flex justify-between items-center flex-shrink-0 shadow-lg">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-emerald-500/20 rounded-lg shadow">
+                    <svg class="w-7 h-7 text-emerald-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path d="M12 22a7 7 0 0 0 7-7h-2a5 5 0 0 1-5 5v2z"/>
+                        <path d="M5 15a7 7 0 0 1 7-7v-2a9 9 0 0 0-9 9h2z"/>
+                        <path d="M17 10V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/>
+                        <path d="m17 14 3-3-3-3"/>
+                        <path d="M12 19 9 16l3-3"/>
+                    </svg>
+                </div>
+                <h1 class="text-2xl font-bold text-white tracking-wide drop-shadow">PetraCore Dashboard</h1>
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="sim-control-btn" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-1 px-4 rounded-full shadow transition-colors">Start Simulation</button>
+                <div id="system-status" class="flex items-center space-x-2 text-sm">
+                    <div class="w-3 h-3 bg-gray-500 rounded-full"></div>
+                    <span class="text-gray-400 font-medium">Connecting...</span>
+                </div>
+                <div class="text-sm text-gray-300 font-mono" id="current-time"></div>
+            </div>
+        </header>
+
+        <main class="flex-1 p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 ">
+            <div class="lg:col-span-2 flex flex-col gap-4 lg:gap-6 overflow-hidden">
+                <div class="bg-gray-800/70 rounded-xl border border-emerald-700 p-4 flex flex-col flex-1 panel">
+                    <h2 class="text-lg font-semibold mb-4 text-emerald-300 tracking-wide">Mine Overview - Site Alpha</h2>
+                    <div class="flex-1 flex items-center justify-center min-h-0">
+                        <div id="map-loader" class="text-center text-gray-400 flex flex-col items-center">
+                            <div class="spinner mb-2"></div>
+                            Loading Map Data...
+                        </div>
+                        <svg id="mine-map" viewBox="0 0 800 500" class="w-full h-full object-contain hidden">
+                            <path id="zone-a" class="zone" d="M100 50 C 250 20, 400 150, 500 100 L 550 200 C 400 250, 200 220, 100 150 Z" fill="#4a5568"/>
+                            <path id="zone-b" class="zone" d="M500 100 C 600 50, 750 150, 700 250 L 550 200 Z" fill="#4a5568"/>
+                            <path id="zone-c" class="zone" d="M100 150 C 200 220, 400 250, 550 200 L 580 350 C 400 400, 200 380, 80 300 Z" fill="#4a5568"/>
+                            <path id="zone-d" class="zone" d="M550 200 L 700 250 L 650 400 L 580 350 Z" fill="#4a5568"/>
+                            <path id="zone-e" class="zone" d="M80 300 C 200 380, 400 400, 580 350 L 500 450 L 150 450 Z" fill="#4a5568"/>
+                            <text x="280" y="140" font-family="Inter" font-size="24" fill="white" font-weight="bold">Zone A</text>
+                            <text x="600" y="180" font-family="Inter" font-size="24" fill="white" font-weight="bold">Zone B</text>
+                            <text x="320" y="280" font-family="Inter" font-size="24" fill="white" font-weight="bold">Zone C</text>
+                            <text x="600" y="320" font-family="Inter" font-size="24" fill="white" font-weight="bold">Zone D</text>
+                            <text x="300" y="400" font-family="Inter" font-size="24" fill="white" font-weight="bold">Zone E</text>
+                        </svg>
+                    </div>
+                </div>
+                <div class="bg-gray-800/70 rounded-xl border border-emerald-700 p-4 h-48 lg:h-56 flex flex-col panel">
+                    <h2 class="text-lg font-semibold mb-2 text-emerald-300">Real-Time Alerts</h2>
+                    <div id="alerts-container" class="flex-1 overflow-y-auto space-y-2 pr-2">
+                        <div class="text-center text-gray-400 pt-8">Connecting to alerts feed...</div>
+                    </div>
+                </div>
+            </div>
+            <div id="details-panel" class="bg-gray-800/70 rounded-xl border border-emerald-700 p-4 lg:p-6 flex flex-col overflow-y-auto panel">
+                <div id="details-placeholder" class="m-auto text-center text-gray-400">
+                    <i data-lucide="mouse-pointer-click" class="w-12 h-12 mx-auto mb-4 text-gray-500"></i>
+                    <h3 class="text-lg font-semibold">Select a Zone</h3>
+                    <p>Click on a zone in the map to view detailed information.</p>
+                </div>
+                <div id="details-content" class="hidden">
+                    <h2 class="text-2xl font-bold text-white mb-1" id="zone-name"></h2>
+                    <p class="text-sm text-gray-400 mb-4">Live Data Feed</p>
+                    <div class="bg-gray-900/60 rounded-lg p-4 mb-4">
+                        <p class="text-sm text-gray-400 mb-1">Rockfall Probability</p>
+                        <div class="flex items-baseline space-x-2">
+                            <span class="text-4xl font-bold" id="risk-score"></span>
+                            <span class="text-lg font-medium" id="risk-level"></span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                        <div class="bg-gray-900/60 rounded-lg p-3"><p class="text-xs text-gray-400">Displacement</p><p class="text-lg font-semibold" id="sensor-displacement"></p></div>
+                        <div class="bg-gray-900/60 rounded-lg p-3"><p class="text-xs text-gray-400">Strain</p><p class="text-lg font-semibold" id="sensor-strain"></p></div>
+                        <div class="bg-gray-900/60 rounded-lg p-3"><p class="text-xs text-gray-400">Pore Pressure</p><p class="text-lg font-semibold" id="sensor-pressure"></p></div>
+                        <div class="bg-gray-900/60 rounded-lg p-3"><p class="text-xs text-gray-400">Rainfall (24h)</p><p class="text-lg font-semibold" id="env-rainfall"></p></div>
+                        <div class="bg-gray-900/60 rounded-lg p-3"><p class="text-xs text-gray-400">Temperature</p><p class="text-lg font-semibold" id="env-temp"></p></div>
+                        <div class="bg-gray-900/60 rounded-lg p-3"><p class="text-xs text-gray-400">Vibrations</p><p class="text-lg font-semibold" id="env-vibration"></p></div>
+                    </div>
+                    <div class="mb-4">
+                        <h3 class="text-md font-semibold mb-2 text-white">Seismic Activity</h3>
+                        <div class="bg-gray-900/60 rounded-lg p-2 flex items-center justify-center h-24">
+                            <canvas id="seismic-gauge" width="180" height="80"></canvas>
+                            <span id="seismic-value" class="ml-4 text-2xl font-bold"></span>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <h3 class="text-md font-semibold mb-2 text-white">Risk Factors Breakdown</h3>
+                        <div class="bg-gray-900/60 rounded-lg p-2 flex items-center justify-center h-48">
+                            <canvas id="risk-pie" width="120" height="120"></canvas>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <h3 class="text-md font-semibold mb-2 text-white">Weather Forecast (Next 3 Days)</h3>
+                        <div class="bg-gray-900/60 rounded-lg p-3 flex flex-col md:flex-row gap-3 justify-between items-center">
+                            <div id="weather-forecast" class="flex gap-6 w-full justify-around"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-md font-semibold mb-2 text-white">Risk Trend (Last 12 Hours)</h3>
+                        <div class="bg-gray-900/60 rounded-lg p-2 h-48"><canvas id="risk-chart"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+        <footer class="bg-gradient-to-r from-emerald-700 via-gray-800 to-emerald-900 text-gray-200 text-center py-3 text-sm border-t border-gray-700 shadow-inner">
+            <span class="inline-flex items-center gap-1">
+                <i data-lucide="shield-alert" class="w-4 h-4 text-emerald-400"></i>
+                PetraCore &copy; 2025 | Live Rockfall Prediction Dashboard
+            </span>
+        </footer>
+    </div>
+    <script>
+    // Lucide icons
+    lucide.createIcons();
+
+    // Show current time
+    function updateTime() {
+        const now = new Date();
+        document.getElementById('current-time').textContent = now.toLocaleTimeString();
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+
+    // Simulated data for each zone - with slight risk fluctuation (1-2%)
+    const zones = {
+        "zone-a": {
+            name: "Zone A",
+            baseRisk: 78, // Base risk value
+            risk: function() { 
+                // Fluctuate ±1-2% from base value
+                const fluctuation = (Math.random() - 0.5) * 2; // -1 to +1
+                return Math.round(this.baseRisk + fluctuation); 
+            },
+            displacement: () => (Math.random() * 10 + 5).toFixed(2) + " mm",
+            strain: () => (Math.random() * 0.5 + 0.2).toFixed(3) + " %",
+            pressure: () => (Math.random() * 20 + 80).toFixed(1) + " kPa",
+            rainfall: () => (Math.random() * 20).toFixed(1) + " mm",
+            temp: () => (Math.random() * 10 + 20).toFixed(1) + " °C",
+            vibration: () => (Math.random() * 0.5 + 0.1).toFixed(2) + " g"
+        },
+        "zone-b": {
+            name: "Zone B",
+            baseRisk: 45, // Base risk value
+            risk: function() { 
+                const fluctuation = (Math.random() - 0.5) * 2; // -1 to +1
+                return Math.round(this.baseRisk + fluctuation); 
+            },
+            displacement: () => (Math.random() * 5 + 2).toFixed(2) + " mm",
+            strain: () => (Math.random() * 0.3 + 0.1).toFixed(3) + " %",
+            pressure: () => (Math.random() * 10 + 90).toFixed(1) + " kPa",
+            rainfall: () => (Math.random() * 10).toFixed(1) + " mm",
+            temp: () => (Math.random() * 8 + 18).toFixed(1) + " °C",
+            vibration: () => (Math.random() * 0.3 + 0.05).toFixed(2) + " g"
+        },
+        "zone-c": {
+            name: "Zone C",
+            baseRisk: 28, // Base risk value
+            risk: function() { 
+                const fluctuation = (Math.random() - 0.5) * 2; // -1 to +1
+                return Math.round(this.baseRisk + fluctuation); 
+            },
+            displacement: () => (Math.random() * 3 + 1).toFixed(2) + " mm",
+            strain: () => (Math.random() * 0.2 + 0.05).toFixed(3) + " %",
+            pressure: () => (Math.random() * 5 + 95).toFixed(1) + " kPa",
+            rainfall: () => (Math.random() * 5).toFixed(1) + " mm",
+            temp: () => (Math.random() * 5 + 15).toFixed(1) + " °C",
+            vibration: () => (Math.random() * 0.2 + 0.01).toFixed(2) + " g"
+        },
+        "zone-d": {
+            name: "Zone D",
+            baseRisk: 62, // Base risk value
+            risk: function() { 
+                const fluctuation = (Math.random() - 0.5) * 2; // -1 to +1
+                return Math.round(this.baseRisk + fluctuation); 
+            },
+            displacement: () => (Math.random() * 7 + 3).toFixed(2) + " mm",
+            strain: () => (Math.random() * 0.4 + 0.15).toFixed(3) + " %",
+            pressure: () => (Math.random() * 15 + 85).toFixed(1) + " kPa",
+            rainfall: () => (Math.random() * 15).toFixed(1) + " mm",
+            temp: () => (Math.random() * 7 + 17).toFixed(1) + " °C",
+            vibration: () => (Math.random() * 0.4 + 0.08).toFixed(2) + " g"
+        },
+        "zone-e": {
+            name: "Zone E",
+            baseRisk: 32, // Base risk value
+            risk: function() { 
+                const fluctuation = (Math.random() - 0.5) * 2; // -1 to +1
+                return Math.round(this.baseRisk + fluctuation); 
+            },
+            displacement: () => (Math.random() * 2 + 0.5).toFixed(2) + " mm",
+            strain: () => (Math.random() * 0.1 + 0.02).toFixed(3) + " %",
+            pressure: () => (Math.random() * 8 + 92).toFixed(1) + " kPa",
+            rainfall: () => (Math.random() * 3).toFixed(1) + " mm",
+            temp: () => (Math.random() * 4 + 14).toFixed(1) + " °C",
+            vibration: () => (Math.random() * 0.1 + 0.01).toFixed(2) + " g"
+        }
+    };
+
+    // Simulated alerts
+    const alertLevels = [
+        { level: "High", class: "high-risk-text", icon: "alert-triangle", msg: "Rockfall risk detected!" },
+        { level: "Moderate", class: "moderate-risk-text", icon: "alert-circle", msg: "Moderate risk, monitor closely." },
+        { level: "Low", class: "low-risk-text", icon: "check-circle", msg: "Low risk, all clear." }
+    ];
+
+    // Chart.js instances
+    let riskChart = null;
+    let seismicGauge = null;
+    let riskPie = null;
+
+    let chartData = Array(12).fill(0);
+
+    // State
+    let selectedZone = null;
+    let simRunning = false;
+    let simInterval = null;
+    let alertInterval = null;
+
+    // Helper: Get risk level text and color
+    function getRiskLevel(score) {
+        if (score >= 70) return { text: "High", class: "high-risk-text" };
+        if (score >= 40) return { text: "Moderate", class: "moderate-risk-text" };
+        return { text: "Low", class: "low-risk-text" };
+    }
+
+    // Show/hide map loader
+    setTimeout(() => {
+        document.getElementById('map-loader').style.display = 'none';
+        document.getElementById('mine-map').classList.remove('hidden');
+    }, 1200);
+
+    // Zone click logic
+    document.addEventListener('DOMContentLoaded', () => {
+        lucide.createIcons();
+
+        // Zone click events
+        Object.keys(zones).forEach(zoneId => {
+            document.getElementById(zoneId).addEventListener('click', () => {
+                selectZone(zoneId);
+            });
+        });
+
+        // Simulation control
+        document.getElementById('sim-control-btn').addEventListener('click', toggleSimulation);
+
+        // Initial system status
+        setTimeout(() => {
+            setSystemStatus(true);
+        }, 1500);
+    });
+
+    function setSystemStatus(connected) {
+        const statusDot = document.querySelector('#system-status div');
+        const statusText = document.querySelector('#system-status span');
+        if (connected) {
+            statusDot.classList.remove('bg-gray-500');
+            statusDot.classList.add('bg-emerald-400');
+            statusText.textContent = "Live";
+            statusText.classList.remove('text-gray-400');
+            statusText.classList.add('text-emerald-300');
+        } else {
+            statusDot.classList.remove('bg-emerald-400');
+            statusDot.classList.add('bg-gray-500');
+            statusText.textContent = "Connecting...";
+            statusText.classList.remove('text-emerald-300');
+            statusText.classList.add('text-gray-400');
+        }
+    }
+
+    function selectZone(zoneId) {
+        selectedZone = zoneId;
+        // Highlight selected zone
+        document.querySelectorAll('.zone').forEach(z => z.classList.remove('selected'));
+        document.getElementById(zoneId).classList.add('selected');
+        // Show details
+        document.getElementById('details-placeholder').classList.add('hidden');
+        document.getElementById('details-content').classList.remove('hidden');
+        // Populate the details for the first time on click
+        updateZoneDetails();
+    }
+
+    // --- Seismic Gauge ---
+    function updateSeismicGauge(val) {
+        if (!seismicGauge) {
+            seismicGauge = new Chart(document.getElementById('seismic-gauge').getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Seismic', ''],
+                    datasets: [{
+                        data: [val, 10 - val],
+                        backgroundColor: ['#f59e0b', '#374151'],
+                        borderWidth: 0,
+                        cutout: '70%',
+                    }]
+                },
+                options: {
+                    rotation: -90,
+                    circumference: 180,
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } }
+                }
+            });
+        } else {
+            seismicGauge.data.datasets[0].data = [val, 10 - val];
+            seismicGauge.update();
+        }
+        document.getElementById('seismic-value').textContent = val.toFixed(2) + " ML";
+    }
+
+    // --- Risk Factors Pie ---
+    function updateRiskPie(factors) {
+        if (!riskPie) {
+            riskPie = new Chart(document.getElementById('risk-pie').getContext('2d'), {
+                type: 'pie',
+                data: {
+                    labels: Object.keys(factors),
+                    datasets: [{
+                        data: Object.values(factors),
+                        backgroundColor: ['#34d399', '#f59e42', '#60a5fa', '#f87171', '#a78bfa', '#fbbf24'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    plugins: { legend: { labels: { color: '#fff', font: { size: 12 } } } }
+                }
+            });
+        } else {
+            riskPie.data.labels = Object.keys(factors);
+            riskPie.data.datasets[0].data = Object.values(factors);
+            riskPie.update();
+        }
+    }
+
+    // --- Weather Forecast ---
+    function updateWeatherForecast() {
+        const icons = ['cloud-rain', 'sun', 'cloud-lightning'];
+        const days = ['Tomorrow', 'Day+2', 'Day+3'];
+        const forecast = [];
+        for (let i = 0; i < 3; i++) {
+            forecast.push({
+                icon: icons[Math.floor(Math.random() * icons.length)],
+                temp: (18 + Math.random() * 12).toFixed(1),
+                rain: (Math.random() * 20).toFixed(1)
+            });
+        }
+        document.getElementById('weather-forecast').innerHTML = forecast.map((f, i) => `
+            <div class="flex flex-col items-center">
+                <i data-lucide="${f.icon}" class="w-7 h-7 mb-1 text-emerald-300"></i>
+                <span class="text-xs text-gray-400">${days[i]}</span>
+                <span class="text-lg font-semibold">${f.temp}°C</span>
+                <span class="text-xs text-blue-300">${f.rain} mm rain</span>
+            </div>
+        `).join('');
+        lucide.createIcons();
+    }
+
+    // --- FIXED Main update function ---
+    function updateZoneDetails() {
+        if (!selectedZone) return;
+        const zone = zones[selectedZone];
+        const riskScore = zone.risk();
+        const riskLevel = getRiskLevel(riskScore);
+
+        document.getElementById('zone-name').textContent = zone.name;
+        document.getElementById('risk-score').textContent = riskScore + "%";
+        document.getElementById('risk-level').textContent = riskLevel.text + " Risk";
+        document.getElementById('risk-level').className = "text-lg font-medium " + riskLevel.class;
+
+        // Reset any existing pulse animation class before adding a new one
+        const riskScoreEl = document.getElementById('risk-score');
+        riskScoreEl.classList.remove('high-risk-pulse');
+        if (riskLevel.text === "High") {
+            riskScoreEl.classList.add('high-risk-pulse');
+        }
+
+        document.getElementById('sensor-displacement').textContent = zone.displacement();
+        document.getElementById('sensor-strain').textContent = zone.strain();
+        document.getElementById('sensor-pressure').textContent = zone.pressure();
+        document.getElementById('env-rainfall').textContent = zone.rainfall();
+        document.getElementById('env-temp').textContent = zone.temp();
+        document.getElementById('env-vibration').textContent = zone.vibration();
+
+        // --- Update new charts and info ---
+        // Seismic Gauge (simulate 0-10 ML)
+        updateSeismicGauge(Math.random() * 7 + 2);
+
+        // Risk Factors Pie (simulate breakdown)
+        updateRiskPie({
+            Displacement: Math.random() * 30 + 10,
+            Strain: Math.random() * 20 + 10,
+            Pressure: Math.random() * 20 + 10,
+            Rainfall: Math.random() * 10 + 5,
+            Temperature: Math.random() * 10 + 5,
+            Vibration: Math.random() * 10 + 5
+        });
+
+        // Weather Forecast
+        updateWeatherForecast();
+
+        // Update risk trend chart
+        updateRiskChart(riskScore);
+    };
+
+    function updateRiskChart(newScore) {
+        chartData.push(newScore);
+        if (chartData.length > 12) chartData.shift();
+        if (!riskChart) {
+            const ctx = document.getElementById('risk-chart').getContext('2d');
+            riskChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array(12).fill('').map((_, i) => (12 - i) + "h ago"),
+                    datasets: [{
+                        label: 'Risk (%)',
+                        data: chartData,
+                        borderColor: '#34d399',
+                        backgroundColor: 'rgba(52,211,153,0.15)',
+                        tension: 0.4,
+                        pointRadius: 3,
+                        pointBackgroundColor: '#34d399',
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { min: 0, max: 100, ticks: { color: '#9ca3af' }, grid: { color: '#374151' } },
+                        x: { ticks: { color: '#9ca3af' }, grid: { color: '#374151' } }
+                    }
+                }
+            });
+        } else {
+            riskChart.data.datasets[0].data = chartData;
+            riskChart.update();
+        }
+    }
+
+    // Simulation logic
+    function toggleSimulation() {
+        simRunning = !simRunning;
+        const btn = document.getElementById('sim-control-btn');
+        btn.textContent = simRunning ? "Stop Simulation" : "Start Simulation";
+        btn.classList.toggle('bg-red-600', simRunning);
+        btn.classList.toggle('hover:bg-red-500', simRunning);
+        btn.classList.toggle('bg-emerald-600', !simRunning);
+        btn.classList.toggle('hover:bg-emerald-500', !simRunning);
+        if (simRunning) {
+            if (selectedZone) updateZoneDetails(); // Update immediately on start
+            simInterval = setInterval(() => {
+                if (selectedZone) updateZoneDetails();
+            }, 2000);
+            alertInterval = setInterval(pushRandomAlert, 3500);
+        } else {
+            clearInterval(simInterval);
+            clearInterval(alertInterval);
+        }
+    }
+
+    // Alerts logic
+    function pushRandomAlert() {
+        const zoneKeys = Object.keys(zones);
+        const zoneId = zoneKeys[Math.floor(Math.random() * zoneKeys.length)];
+        const zone = zones[zoneId];
+        const riskScore = zone.risk();
+        const riskLevel = getRiskLevel(riskScore);
+        const alertType = alertLevels.find(a => a.level === riskLevel.text);
+
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-900/70 border-l-4 ${riskLevel.text === "High" ? "border-red-500" : riskLevel.text === "Moderate" ? "border-yellow-400" : "border-green-500"}`;
+        alertDiv.innerHTML = `
+            <i data-lucide="${alertType.icon}" class="w-5 h-5 ${alertType.class}"></i>
+            <span class="font-semibold ${alertType.class}">${zone.name}:</span>
+            <span class="text-sm">${alertType.msg} (${riskScore}%)</span>
+            <span class="ml-auto text-xs text-gray-400">${new Date().toLocaleTimeString()}</span>
+        `;
+        const container = document.getElementById('alerts-container');
+        if (container.children.length && container.children[0].classList.contains('pt-8')) {
+            container.innerHTML = '';
+        }
+        container.prepend(alertDiv);
+        lucide.createIcons();
+        // Limit to 8 alerts
+        while (container.children.length > 8) container.removeChild(container.lastChild);
+    }
+   
+    </script>
+</body>
+</html>
